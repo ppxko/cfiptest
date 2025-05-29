@@ -104,6 +104,26 @@ cat o.txt|grep open|awk '{print $4","$3}' > ip.txt
 | Linux   | Mipsle    | 32     | linux-mipsle.tar.gz   | 路由器     |
 | Linux   | Mipsle    | 64     | linux-mips64le.tar.gz | 路由器     |
 
+
+delay.go 控制延迟测速的主要逻辑。首先，根据 EnableTLS 在 GetDelayTestURL 中生成访问 /cdn-cgi/trace 的完整地址。
+TestDelay 函数以设定的并发数遍历所有待测 IP：
+
+通过 thread 限制协程数；
+
+根据 DelayTestType 选择只测 TCP (TestTCP) 还是完全的 HTTP 延迟 (TestDelayOnce)；
+
+将成功结果写入 resultChan，同时统计和打印进度。
+
+TestTCP 仅建立 TCP 连接并返回连接耗时。
+更完整的测量由 TestDelayOnce 完成：它先调用 TestDelayUseH1 建立 TCP 连接并发送 HTTP/1 请求。
+TestDelayUseH1 在 delay_h1.go 中实现：复用已建立的连接向 GetDelayTestURL 发送带 User-Agent 的 GET 请求，读取返回内容并记录建立连接的耗时。读取时通过 readWithTimeout 防止卡死。
+
+随后 TestDelayOnce 解析返回的文本，匹配 colo=XXX 提取数据中心代码，并根据配置的 LocationMap 得到地区和城市；若启用了 WebSocket 验证，则会额外通过 TestWebSocketDelay 确认 WebSocket 握手。最终，函数把 IP、端口、数据中心、位置及连接耗时封装为 Result 返回。
+
+常量 timeout 和 maxDuration 控制整个连接与读写的超时限制，分别为 1500 毫秒和 3000 毫秒。
+
+综上，delay.go 通过并发控制、TCP/HTTP 请求以及对返回数据的解析，完成对每个 IP 的网络延迟测试并记录测试结果。
+
 # 许可证
 The MIT License (MIT)
 
