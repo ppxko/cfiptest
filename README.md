@@ -124,6 +124,45 @@ TestDelayUseH1 在 delay_h1.go 中实现：复用已建立的连接向 GetDelayT
 
 综上，delay.go 通过并发控制、TCP/HTTP 请求以及对返回数据的解析，完成对每个 IP 的网络延迟测试并记录测试结果。
 
+----------------------------------
+
+代码中下载测试逻辑集中在 pkgs/speed/download.go 中。执行延迟测试后，TestDownload 会并发从 resultChan 读取有效 IP，并调用 getDownloadSpeed 测试下载速度。
+getDownloadSpeed 的过程为：
+
+根据是否启用 TLS 拼接测试地址，并构造 HTTP 请求。
+
+用 net.Dialer 与目标 IP 建立 TCP 连接，再通过自定义 http.Client 复用该连接发送 GET 请求。
+
+从响应头读取 Cf-Meta-Colo 数据中心信息，同时循环读取响应体字节数；若测速时间超过 2 秒且速度明显不足，会提前终止。
+
+最终以 “已下载字节 / 用时” 计算 MB/s 并返回。
+
+TestDownload 统计每个 IP 的速度与延迟，并根据 MinSpeed 等条件筛选结果，输出时按下载速度从高到低排序。
+用户在 README.md 也能看到程序会输出下载速度等信息。
+
+综上，下载测试通过并发连接每个 IP，直接在同一 TCP 连接上下载指定文件，对传输字节数和耗时进行统计后计算平均速度。这样即可对 Cloudflare IP 的下载性能进行评估。
+
+
+通过阅读 pkgs/speed/download.go 可见，下载测速会对每个通过延迟测试的 IP 创建 TCP 连接，再在该连接上发起 HTTP 请求以统计传输速率。关键实现如下：
+
+构造测速 URL
+若 SpeedTestURL 没有前缀协议，就根据 EnableTLS 补上 http 或 https
+
+直接拨号到目标 IP
+使用 net.Dialer 与 ip:port 建立 TCP 连接，不走 DNS 解析
+
+复用连接发送请求
+创建 http.Client，其 Transport 的 Dial 回调直接返回上面建立的连接，这样请求就通过该 IP 发出
+
+计算速度
+循环读取响应体的字节数并计算耗时得出下载速率
+
+请求会被转发到 Cloudflare 的测速源。仓库提供了 _worker.js 脚本，把客户端请求映射到 speed.cloudflare.com/__down，以保证数据下载来源一致
+
+因此，程序通过在本地直接连到待测 IP，并将 HTTP 客户端强制使用这条连接，就能在测速过程中真正通过该 IP 进行文件下载。 Speed 值则由读取到的字节量除以耗时得到。
+
+---------------------------------------
+
 # 许可证
 The MIT License (MIT)
 
